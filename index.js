@@ -21,7 +21,7 @@ async function run() {
   try {
     const myDB = client.db("xports");
     const userCollection = myDB.collection("users");
-
+    const contestCollection = myDB.collection("contests")
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.role = "user";
@@ -40,6 +40,17 @@ async function run() {
       const cursor = await userCollection.find().toArray();
       res.send(cursor);
     });
+
+    app.post('/contests', async (req,res)=>{
+        const data = req.body
+        console.log(data);
+        const result = await contestCollection.insertOne(data)
+        res.send(result)
+    })
+    app.get('/contests', async (req,res)=>{
+        const result = await contestCollection.find().toArray()
+        res.send(result)
+    })
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
