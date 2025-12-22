@@ -48,8 +48,14 @@ async function run() {
         res.send(result)
     })
     app.get('/contests', async (req,res)=>{
-        const result = await contestCollection.find().toArray()
-        res.send(result)
+        const skip = parseInt(req.query.skip)
+        const limit = parseInt(req.query.limit)
+        const result = await contestCollection.find().skip(skip).limit(limit).sort({participantsCount: -1}).toArray()
+        const total = await contestCollection.countDocuments()
+        res.send({
+          contests : result,
+          total : total
+        })
     })
 
     // Send a ping to confirm a successful connection
