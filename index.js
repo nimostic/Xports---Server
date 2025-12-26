@@ -81,6 +81,49 @@ async function run() {
       const result = await contestCollection.find(query).toArray();
       res.send(result);
     });
+    app.get("/my-contests", async (req, res) => {
+      const { email } = req.query;
+      const query = {
+        ownerEmail: email,
+      };
+      const result = await contestCollection.find(query).toArray();
+      const total = await contestCollection.countDocuments(query);
+      res.send(result);
+    });
+    app.delete("/contests/:id", async (req, res) => {
+      const { email } = req.query;
+      const { id } = req.params;
+      const query = {
+        _id: new ObjectId(id),
+        ownerEmail: email,
+      };
+      const result = await contestCollection.deleteOne(query);
+      res.send(result);
+    });
+    app.patch("/contests/:id", async (req, res) => {
+      const {id} = req.params;
+      const { email } = req.query;
+      const data = req.body;
+      const query = {
+        _id: new ObjectId(id),
+        ownerEmail: email,
+      };
+
+      const updatedDoc = {
+        $set: {
+          contestName: data.contestName,
+          contestType: data.contestType,
+          price: data.price,
+          prizeMoney: data.prizeMoney,
+          instruction: data.instruction,
+          description: data.description,
+          deadline: data.deadline,
+        },
+      };
+
+      const result = await contestCollection.updateOne(query, updatedDoc);
+      res.send(result);
+    });
 
     //submissions task
     app.post("/submissions/task", async (req, res) => {
