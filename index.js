@@ -3,13 +3,42 @@ const app = express();
 const port = process.env.PORT || 3000;
 require("dotenv").config();
 const cors = require("cors");
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
+
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./fir-template-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+//this is middleware
 app.use(cors());
 app.use(express.json());
-const stripe = require("stripe")(process.env.STRIPE_SECRET);
+
+const verifyFBToken = async (req, res, next) => {
+  const token = req.headers.authorization;
+  // console.log("TOKEN:", req.headers.authorization);
+  
+
+  if (!token) {
+    return res.status(401).send({ message: `unauthorized access` });
+  }
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log("decoded in the token", decoded);
+    req.decoded_email = decoded.email;
+    // console.log("EMAIL:", req.decoded_email);
+    next();
+  } catch (err) {
+    return res.status(401).send({ message: `unauthorized access` });
+  }
+};
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.gubl8vg.mongodb.net/?appName=Cluster0`;
-//stripe
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -25,7 +54,30 @@ async function run() {
     const userCollection = myDB.collection("users");
     const contestCollection = myDB.collection("contests");
     const submissionsCollection = myDB.collection("submissions");
-    // const paymentsCollection = myDB.collection("payments");
+
+    // verify admin
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      // console.log(user);
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
+    // verify creator
+    const verifyCreator = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      console.log(user);
+      if (!user || user.role !== "creator") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
 
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -41,22 +93,54 @@ async function run() {
       // console.log(user);
     });
 
-    app.get("/users", async (req, res) => {
-      const cursor = await userCollection.find().toArray();
-      res.send(cursor);
+    app.get("/users", verifyFBToken, verifyAdmin, async (req, res) => {
+      const { searchText } = req.query;
+      const query = {};
+      if (searchText) {
+        query.$or = [
+          { displayName: { $regex: searchText, $options: "i" } },
+          { email: { $regex: searchText, $options: "i" } },
+        ];
+      }
+      const cursor = userCollection.find(query).sort({ createdAt: -1 });
+      const result = await cursor.toArray();
+      res.send(result);
     });
 
-    app.post("/contests", async (req, res) => {
+    //user delete
+    app.delete("/users/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const cursor = userCollection.findOne(query);
+      if (!cursor) {
+        return res.send({ message: "user not found" });
+      }
+      const result = await userCollection.deleteOne(query);
+      res.send(result);
+    });
+    //role update
+    // app.patch("/users",async(req,res)=>{
+
+    // })
+
+    app.post("/contests", verifyFBToken, async (req, res) => {
       const data = req.body;
       // console.log(data);
       const result = await contestCollection.insertOne(data);
       res.send(result);
     });
+
+    //get all contest
+
     app.get("/contests", async (req, res) => {
+      const searchText = req.query.searchText;
       const skip = parseInt(req.query.skip);
       const limit = parseInt(req.query.limit);
       const type = req.query.type;
       let query = {};
+      if (searchText) {
+        query.contestName = { $regex: searchText, $options: "i" };
+      }
       if (type && type !== "All") {
         query = { contestType: type };
       }
@@ -81,7 +165,7 @@ async function run() {
       const result = await contestCollection.find(query).toArray();
       res.send(result);
     });
-    app.get("/my-contests", async (req, res) => {
+    app.get("/my-contests", verifyFBToken, async (req, res) => {
       const { email } = req.query;
       const query = {
         ownerEmail: email,
@@ -90,7 +174,7 @@ async function run() {
       const total = await contestCollection.countDocuments(query);
       res.send(result);
     });
-    app.delete("/contests/:id", async (req, res) => {
+    app.delete("/contests/:id", verifyFBToken, async (req, res) => {
       const { email } = req.query;
       const { id } = req.params;
       const query = {
@@ -100,7 +184,7 @@ async function run() {
       const result = await contestCollection.deleteOne(query);
       res.send(result);
     });
-    app.patch("/contests/:id", async (req, res) => {
+    app.patch("/contests/:id", verifyFBToken, async (req, res) => {
       const { id } = req.params;
       const { email } = req.query;
       const data = req.body;
@@ -126,7 +210,7 @@ async function run() {
     });
 
     //submissions task
-    app.post("/submissions/task", async (req, res) => {
+    app.post("/submissions/task", verifyFBToken, async (req, res) => {
       const data = req.body;
       // console.log(data);
       const { participantEmail, contestId, submissionLink, submittedAt } =
@@ -188,7 +272,41 @@ async function run() {
       res.send({ registered: false });
     });
 
-    
+    //handling pending contest by admin
+    app.patch(
+      "/pending-contests/:contestId",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const { status } = req.query;
+        console.log(status);
+        const query = {
+          _id: new ObjectId(req.params.contestId),
+        };
+        const updatedDoc = {
+          $set: {
+            status: status,
+          },
+        };
+        const result = await contestCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      }
+    );
+
+    //delete contests by admin => future veriffy admni korte hbe
+    app.delete(
+      "/admin/contests/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const { id } = req.params;
+        const query = {
+          _id: new ObjectId(id),
+        };
+        const result = await contestCollection.deleteOne(query);
+        res.send(result);
+      }
+    );
 
     // total submissions by contest
     app.get("/contests/:contestId/submissions", async (req, res) => {
@@ -211,8 +329,8 @@ async function run() {
         {
           $set: {
             winnerName: participantName,
-            winnerEmail : participantEmail,
-            winnerPhoto : participantPhoto,
+            winnerEmail: participantEmail,
+            winnerPhoto: participantPhoto,
             status: "completed",
           },
         }
@@ -280,7 +398,7 @@ async function run() {
       }
     });
 
-    app.post("/payment-success", async (req, res) => {
+    app.post("/payment-success", verifyFBToken, async (req, res) => {
       const { sessionId } = req.body;
       const session = await stripe.checkout.sessions.retrieve(sessionId);
 
