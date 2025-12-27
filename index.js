@@ -101,7 +101,7 @@ async function run() {
       res.send(result);
     });
     app.patch("/contests/:id", async (req, res) => {
-      const {id} = req.params;
+      const { id } = req.params;
       const { email } = req.query;
       const data = req.body;
       const query = {
@@ -165,7 +165,8 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/submissions/check", async (req, res) => {
+    //check is registered (paid)
+    app.get("/submissions/check-registration", async (req, res) => {
       const { email, contestId } = req.query;
       // console.log(contestId);
       if (!email || !contestId) {
@@ -187,11 +188,49 @@ async function run() {
       res.send({ registered: false });
     });
 
+    
+
+    // total submissions by contest
+    app.get("/contests/:contestId/submissions", async (req, res) => {
+      const query = {
+        contestId: req.params.contestId,
+      };
+      const result = await submissionsCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // winner selected api
+    app.patch("/declare-winner/:contestId", async (req, res) => {
+      const { contestId } = req.params;
+      const { participantEmail, participantName, _id, participantPhoto } =
+        req.body;
+
+      //update in contest collection
+      await contestCollection.updateOne(
+        { _id: new ObjectId(contestId) },
+        {
+          $set: {
+            winnerName: participantName,
+            winnerEmail : participantEmail,
+            winnerPhoto : participantPhoto,
+            status: "completed",
+          },
+        }
+      );
+      // winner mark in submision collection
+      const result = await submissionsCollection.updateOne(
+        { _id: new ObjectId(_id) },
+        { $set: { isWinner: true } }
+      );
+
+      res.send(result);
+    });
+
     //===================payment related api====================
 
     app.post("/create-checkout-session", async (req, res) => {
       const submitInfo = req.body;
-      console.log(submitInfo);
+      // console.log(submitInfo);
       const amount = parseInt(submitInfo.price) * 100;
 
       const session = await stripe.checkout.sessions.create({
