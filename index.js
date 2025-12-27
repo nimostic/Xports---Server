@@ -9,6 +9,11 @@ const admin = require("firebase-admin");
 
 const serviceAccount = require("./fir-template-firebase-adminsdk.json");
 
+// const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+//   "utf8"
+// );
+// const serviceAccount = JSON.parse(decoded);
+
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
@@ -20,7 +25,6 @@ app.use(express.json());
 const verifyFBToken = async (req, res, next) => {
   const token = req.headers.authorization;
   // console.log("TOKEN:", req.headers.authorization);
-  
 
   if (!token) {
     return res.status(401).send({ message: `unauthorized access` });
