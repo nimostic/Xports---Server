@@ -106,7 +106,7 @@ async function run() {
           { email: { $regex: searchText, $options: "i" } },
         ];
       }
-      const cursor = userCollection.find(query).sort({ createdAt: -1 });
+      const cursor = userCollection.find(query).sort({status:-1, createdAt: -1 });
       const result = await cursor.toArray();
       res.send(result);
     });
@@ -123,29 +123,57 @@ async function run() {
       res.send(result);
     });
     //role update
-    app.patch("/users/role/:id",verifyFBToken,verifyAdmin, async (req, res) => {
-      const { id } = req.params;
-      const { role } = req.body;
-      console.log(id, role);
-      const query = {
-        _id: new ObjectId(id),
-      };
-
-      try {
-        const user = await userCollection.findOne(query);
-        if (!user) {
-          return res.send({ message: "user not found" });
-        }
-        const updatedDoc = {
-          $set: {
-            role: role,
-          },
+    app.patch(
+      "/users/role/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const { id } = req.params;
+        const { role } = req.body;
+        console.log(id, role);
+        const query = {
+          _id: new ObjectId(id),
         };
-        const result = await userCollection.updateOne(query, updatedDoc);
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: "Server error occurred" });
+
+        try {
+          const user = await userCollection.findOne(query);
+          if (!user) {
+            return res.send({ message: "user not found" });
+          }
+          const updatedDoc = {
+            $set: {
+              role: role,
+              status: "approved"
+            },
+          };
+          const result = await userCollection.updateOne(query, updatedDoc);
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: "Server error occurred" });
+        }
       }
+    );
+
+    //get a user's role
+    app.get("/users/role",verifyFBToken,async (req,res)=>{
+      const email = req.decoded_email
+      // console.log(email);
+      const result = await userCollection.findOne({email : email})
+      res.send({role:result?.role ,status:result?.status})
+    })
+    //request to make a creator
+    app.patch("/users/apply-creator/:email", verifyFBToken, async (req, res) => {
+
+      const query = {
+        email: req.params.email,
+      };
+      const updatedDoc = {
+        $set: {
+          status: "pending_creator",
+        },
+      };
+      const result = await userCollection.updateOne(query, updatedDoc);
+      res.send(result);
     });
 
     app.post("/contests", verifyFBToken, async (req, res) => {
