@@ -32,7 +32,7 @@ const verifyFBToken = async (req, res, next) => {
   try {
     const idToken = token.split(" ")[1];
     const decoded = await admin.auth().verifyIdToken(idToken);
-    console.log("decoded in the token", decoded);
+    // console.log("decoded in the token", decoded);
     req.decoded_email = decoded.email;
     // console.log("EMAIL:", req.decoded_email);
     next();
@@ -123,9 +123,30 @@ async function run() {
       res.send(result);
     });
     //role update
-    // app.patch("/users",async(req,res)=>{
+    app.patch("/users/role/:id",verifyFBToken,verifyAdmin, async (req, res) => {
+      const { id } = req.params;
+      const { role } = req.body;
+      console.log(id, role);
+      const query = {
+        _id: new ObjectId(id),
+      };
 
-    // })
+      try {
+        const user = await userCollection.findOne(query);
+        if (!user) {
+          return res.send({ message: "user not found" });
+        }
+        const updatedDoc = {
+          $set: {
+            role: role,
+          },
+        };
+        const result = await userCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Server error occurred" });
+      }
+    });
 
     app.post("/contests", verifyFBToken, async (req, res) => {
       const data = req.body;
