@@ -76,7 +76,7 @@ async function run() {
       const email = req.decoded_email;
       const query = { email };
       const user = await userCollection.findOne(query);
-      console.log(user);
+      // console.log(user);
       if (!user || user.role !== "creator") {
         return res.status(403).send({ message: "forbidden access" });
       }
@@ -106,9 +106,75 @@ async function run() {
           { email: { $regex: searchText, $options: "i" } },
         ];
       }
-      const cursor = userCollection.find(query).sort({status:-1, createdAt: -1 });
+      const cursor = userCollection
+        .find(query)
+        .sort({ status: -1, createdAt: -1 });
       const result = await cursor.toArray();
       res.send(result);
+    });
+
+    //admin stats
+    app.get("/admin-stats", async (req, res) => {
+      const totalUsers = await userCollection.countDocuments();
+      const totalCreators = await userCollection.countDocuments({
+        role: "creator",
+      });
+      const generalUsers = await userCollection.countDocuments({
+        role: "user",
+      });
+      const totalContests = await contestCollection.countDocuments();
+      const activeContests = await contestCollection.countDocuments({
+        status: "accepted",
+      });
+      const revenueResult = await submissionsCollection
+        .aggregate([{ $group: { _id: null, totalPrice: { $sum: "$price" } } }])
+        .toArray();
+      const revenue = revenueResult[0]?.totalPrice || 0;
+
+      //last 6 month
+      const userGrowth = await userCollection
+        .aggregate([
+          {
+            $group: {
+              _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: 1 } },
+          { $limit: 6 },
+        ])
+        .toArray();
+      const monthNames = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
+      const formattedGrowth = userGrowth.map((item) => {
+        const [year, month] = item._id.split("-");
+        return {
+          month: monthNames[parseInt(month) - 1],
+          users: item.count,
+        };
+      });
+
+      res.send({
+        totalUsers,
+        generalUsers,
+        totalCreators,
+        totalContests,
+        activeContests,
+        revenue,
+        growth: formattedGrowth,
+      });
     });
 
     //user delete
@@ -143,7 +209,7 @@ async function run() {
           const updatedDoc = {
             $set: {
               role: role,
-              status: "approved"
+              status: "approved",
             },
           };
           const result = await userCollection.updateOne(query, updatedDoc);
@@ -155,26 +221,29 @@ async function run() {
     );
 
     //get a user's role
-    app.get("/users/role",verifyFBToken,async (req,res)=>{
-      const email = req.decoded_email
+    app.get("/users/role", verifyFBToken, async (req, res) => {
+      const email = req.decoded_email;
       // console.log(email);
-      const result = await userCollection.findOne({email : email})
-      res.send({role:result?.role ,status:result?.status})
-    })
-    //request to make a creator
-    app.patch("/users/apply-creator/:email", verifyFBToken, async (req, res) => {
-
-      const query = {
-        email: req.params.email,
-      };
-      const updatedDoc = {
-        $set: {
-          status: "pending_creator",
-        },
-      };
-      const result = await userCollection.updateOne(query, updatedDoc);
-      res.send(result);
+      const result = await userCollection.findOne({ email: email });
+      res.send({ role: result?.role, status: result?.status });
     });
+    //request to make a creator
+    app.patch(
+      "/users/apply-creator/:email",
+      verifyFBToken,
+      async (req, res) => {
+        const query = {
+          email: req.params.email,
+        };
+        const updatedDoc = {
+          $set: {
+            status: "pending_creator",
+          },
+        };
+        const result = await userCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      }
+    );
 
     app.post("/contests", verifyFBToken, async (req, res) => {
       const data = req.body;
@@ -190,7 +259,11 @@ async function run() {
       const skip = parseInt(req.query.skip);
       const limit = parseInt(req.query.limit);
       const type = req.query.type;
+      const status = req.query.status;
       let query = {};
+      if (status) {
+        query.status = status;
+      }
       if (searchText) {
         query.contestName = { $regex: searchText, $options: "i" };
       }
@@ -265,7 +338,7 @@ async function run() {
     //submissions task
     app.post("/submissions/task", verifyFBToken, async (req, res) => {
       const data = req.body;
-      // console.log(data);
+      console.log(data);
       const { participantEmail, contestId, submissionLink, submittedAt } =
         req.body;
       let query = {
@@ -273,7 +346,6 @@ async function run() {
         contestId: contestId,
       };
       const submissions = await submissionsCollection.findOne(query);
-      // console.log({submissionsCollection : submissions});
       if (!submissions) {
         return res.status(404).send({
           message: "Registration not found for this contest",
@@ -305,7 +377,6 @@ async function run() {
     //check is registered (paid)
     app.get("/submissions/check-registration", async (req, res) => {
       const { email, contestId } = req.query;
-      // console.log(contestId);
       if (!email || !contestId) {
         return res.status(400).send({ message: "Missing params" });
       }
@@ -385,6 +456,7 @@ async function run() {
             winnerEmail: participantEmail,
             winnerPhoto: participantPhoto,
             status: "completed",
+            wonDate: new Date(),
           },
         }
       );
@@ -397,11 +469,46 @@ async function run() {
       res.send(result);
     });
 
+    //contest won by user
+    app.get("/winners", async (req, res) => {
+      try {
+        const email = req.query.email;
+        let query = {};
+        if (email) {
+          query.winnerEmail = email;
+        } else {
+          query.winnerEmail = { $exists: true, $ne: "" };
+        }
+        const result = await contestCollection
+          .find(query)
+          .sort({ deadline: -1 })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Internal Server Error", error });
+      }
+    });
+
+    //participate contest by individual
+    app.get("/participate", async (req, res) => {
+      try {
+        const email = req.query.email;
+        const result = await submissionsCollection
+          .find({ participantEmail: email })
+          .sort({ deadline: 1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Internal server error", error });
+      }
+    });
+
     //===================payment related api====================
 
     app.post("/create-checkout-session", async (req, res) => {
       const submitInfo = req.body;
-      // console.log(submitInfo);
+      console.log("here ir is", submitInfo);
       const amount = parseInt(submitInfo.price) * 100;
 
       const session = await stripe.checkout.sessions.create({
@@ -451,7 +558,7 @@ async function run() {
       }
     });
 
-    app.post("/payment-success", verifyFBToken, async (req, res) => {
+    app.post("/payment-success", async (req, res) => {
       const { sessionId } = req.body;
       const session = await stripe.checkout.sessions.retrieve(sessionId);
 
@@ -469,10 +576,10 @@ async function run() {
         prizeMoney,
         bannerImage,
         ownerEmail,
+        deadline,
       } = await contestCollection.findOne({
         _id: new ObjectId(session.metadata.contestId),
       });
-      // console.log(session);
       const submitInfo = {
         contestName: contestName,
         contestId: session.metadata.contestId,
@@ -488,7 +595,9 @@ async function run() {
         prizeMoney: prizeMoney,
         price: session.amount_total / 100,
         paidAt: new Date(),
+        deadline: deadline,
       };
+      console.log("sbmit info", submitInfo);
       const result = await submissionsCollection.insertOne(submitInfo);
 
       // update participations in contest
@@ -503,12 +612,6 @@ async function run() {
         success: true,
       });
     });
-
-    // Send a ping to confirm a successful connection
-    // await client.db("admin").command({ ping: 1 });
-    // console.log(
-    //   "Pinged your deployment. You successfully connected to MongoDB!"
-    // );
   } catch (error) {
     console.log(error);
   }
