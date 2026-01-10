@@ -114,7 +114,7 @@ async function run() {
     });
 
     //admin stats
-    app.get("/admin-stats", async (req, res) => {
+    app.get("/admin-stats", verifyFBToken, verifyAdmin, async (req, res) => {
       const totalUsers = await userCollection.countDocuments();
       const totalCreators = await userCollection.countDocuments({
         role: "creator",
@@ -255,7 +255,7 @@ async function run() {
     //get all contest
 
     app.get("/contests", async (req, res) => {
-      const searchText = req.query.searchText;
+      const searchText = req.query.search;
       const skip = parseInt(req.query.skip);
       const limit = parseInt(req.query.limit);
       const type = req.query.type;
@@ -265,10 +265,16 @@ async function run() {
         query.status = status;
       }
       if (searchText) {
-        query.contestName = { $regex: searchText, $options: "i" };
+        // query.contestName = { $regex: searchText, $options: "i" };
+        query.$or = [
+          {
+            contestName: { $regex: searchText, $options: "i" },
+          },
+          { contestType: { $regex: searchText, $options: "i" } },
+        ];
       }
       if (type && type !== "All") {
-        query = { contestType: type };
+        query.contestType = type;
       }
       const result = await contestCollection
         .find(query)
@@ -473,6 +479,7 @@ async function run() {
     app.get("/winners", async (req, res) => {
       try {
         const email = req.query.email;
+        const limit = parseInt(req.query.limit);
         let query = {};
         if (email) {
           query.winnerEmail = email;
@@ -482,6 +489,7 @@ async function run() {
         const result = await contestCollection
           .find(query)
           .sort({ deadline: -1 })
+          .limit(limit)
           .toArray();
 
         res.send(result);
@@ -490,14 +498,47 @@ async function run() {
       }
     });
 
+    //top performers
+    app.get("/top-performers", async (req, res) => {
+      const result = await contestCollection
+        .aggregate([
+          { $match: { winnerEmail: { $exists: true, $ne: "" } } },
+          {
+            $group: {
+              _id: "$winnerEmail", //Unique Identifier ekoi email er group
+              name: { $first: "$winnerName" }, //first jei contest pabe seta pick korbe
+              photo: { $first: "$winnerPhoto" },
+              totalWins: { $sum: 1 },
+              totalEarnings: { $sum: { $toDouble: "$prizeMoney" } },
+            },
+          },
+          {
+            $sort: { totalWins: -1, totalEarnings: -1 },
+          },
+          {
+            $limit: 3,
+          },
+        ])
+        .toArray();
+
+      res.send(result);
+    });
+
     //participate contest by individual
     app.get("/participate", async (req, res) => {
       try {
         const email = req.query.email;
+
+        let query = {};
+        if (email) {
+          query = {
+            participantEmail: email,
+          };
+        }
         const result = await submissionsCollection
-          .find({ participantEmail: email })
+          .find()
           .sort({ deadline: 1 })
-          .toArray();
+          .toArray(query);
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: "Internal server error", error });
