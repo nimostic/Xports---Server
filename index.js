@@ -196,7 +196,7 @@ async function run() {
       async (req, res) => {
         const { id } = req.params;
         const { role } = req.body;
-        console.log(id, role);
+        // console.log(id, role);
         const query = {
           _id: new ObjectId(id),
         };
@@ -217,7 +217,7 @@ async function run() {
         } catch (error) {
           res.status(500).send({ message: "Server error occurred" });
         }
-      }
+      },
     );
 
     //get a user's role
@@ -242,12 +242,11 @@ async function run() {
         };
         const result = await userCollection.updateOne(query, updatedDoc);
         res.send(result);
-      }
+      },
     );
 
-    app.post("/contests", verifyFBToken, async (req, res) => {
+    app.post("/contests", verifyFBToken, verifyCreator, async (req, res) => {
       const data = req.body;
-      // console.log(data);
       const result = await contestCollection.insertOne(data);
       res.send(result);
     });
@@ -316,35 +315,40 @@ async function run() {
       const result = await contestCollection.deleteOne(query);
       res.send(result);
     });
-    app.patch("/contests/:id", verifyFBToken, async (req, res) => {
-      const { id } = req.params;
-      const { email } = req.query;
-      const data = req.body;
-      const query = {
-        _id: new ObjectId(id),
-        ownerEmail: email,
-      };
+    app.patch(
+      "/contests/:id",
+      verifyFBToken,
+      verifyCreator,
+      async (req, res) => {
+        const { id } = req.params;
+        const { email } = req.query;
+        const data = req.body;
+        const query = {
+          _id: new ObjectId(id),
+          ownerEmail: email,
+        };
 
-      const updatedDoc = {
-        $set: {
-          contestName: data.contestName,
-          contestType: data.contestType,
-          price: data.price,
-          prizeMoney: data.prizeMoney,
-          instruction: data.instruction,
-          description: data.description,
-          deadline: data.deadline,
-        },
-      };
+        const updatedDoc = {
+          $set: {
+            contestName: data.contestName,
+            contestType: data.contestType,
+            price: data.price,
+            prizeMoney: data.prizeMoney,
+            instruction: data.instruction,
+            description: data.description,
+            deadline: data.deadline,
+          },
+        };
 
-      const result = await contestCollection.updateOne(query, updatedDoc);
-      res.send(result);
-    });
+        const result = await contestCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      },
+    );
 
     //submissions task
     app.post("/submissions/task", verifyFBToken, async (req, res) => {
       const data = req.body;
-      console.log(data);
+      //console.log(data);
       const { participantEmail, contestId, submissionLink, submittedAt } =
         req.body;
       let query = {
@@ -375,7 +379,7 @@ async function run() {
             submittedAt: submittedAt,
           },
         },
-        { upsert: true }
+        { upsert: true },
       );
       res.send(result);
     });
@@ -409,7 +413,7 @@ async function run() {
       verifyAdmin,
       async (req, res) => {
         const { status } = req.query;
-        console.log(status);
+        //console.log(status);
         const query = {
           _id: new ObjectId(req.params.contestId),
         };
@@ -420,7 +424,7 @@ async function run() {
         };
         const result = await contestCollection.updateOne(query, updatedDoc);
         res.send(result);
-      }
+      },
     );
 
     //delete contests by admin => future veriffy admni korte hbe
@@ -435,7 +439,7 @@ async function run() {
         };
         const result = await contestCollection.deleteOne(query);
         res.send(result);
-      }
+      },
     );
 
     // total submissions by contest
@@ -448,32 +452,37 @@ async function run() {
     });
 
     // winner selected api
-    app.patch("/declare-winner/:contestId", async (req, res) => {
-      const { contestId } = req.params;
-      const { participantEmail, participantName, _id, participantPhoto } =
-        req.body;
+    app.patch(
+      "/declare-winner/:contestId",
+      verifyFBToken,
+      verifyCreator,
+      async (req, res) => {
+        const { contestId } = req.params;
+        const { participantEmail, participantName, _id, participantPhoto } =
+          req.body;
 
-      //update in contest collection
-      await contestCollection.updateOne(
-        { _id: new ObjectId(contestId) },
-        {
-          $set: {
-            winnerName: participantName,
-            winnerEmail: participantEmail,
-            winnerPhoto: participantPhoto,
-            status: "completed",
-            wonDate: new Date(),
+        //update in contest collection
+        await contestCollection.updateOne(
+          { _id: new ObjectId(contestId) },
+          {
+            $set: {
+              winnerName: participantName,
+              winnerEmail: participantEmail,
+              winnerPhoto: participantPhoto,
+              status: "completed",
+              wonDate: new Date(),
+            },
           },
-        }
-      );
-      // winner mark in submision collection
-      const result = await submissionsCollection.updateOne(
-        { _id: new ObjectId(_id) },
-        { $set: { isWinner: true } }
-      );
+        );
+        // winner mark in submision collection
+        const result = await submissionsCollection.updateOne(
+          { _id: new ObjectId(_id) },
+          { $set: { isWinner: true } },
+        );
 
-      res.send(result);
-    });
+        res.send(result);
+      },
+    );
 
     //contest won by user
     app.get("/winners", async (req, res) => {
@@ -528,17 +537,18 @@ async function run() {
     app.get("/participate", async (req, res) => {
       try {
         const email = req.query.email;
-
+        //console.log(email);
         let query = {};
         if (email) {
           query = {
             participantEmail: email,
           };
         }
+        //console.log(query);
         const result = await submissionsCollection
-          .find()
+          .find(query)
           .sort({ deadline: 1 })
-          .toArray(query);
+          .toArray();
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: "Internal server error", error });
@@ -549,7 +559,7 @@ async function run() {
 
     app.post("/create-checkout-session", async (req, res) => {
       const submitInfo = req.body;
-      console.log("here ir is", submitInfo);
+      //console.log("here ir is", submitInfo);
       const amount = parseInt(submitInfo.price) * 100;
 
       const session = await stripe.checkout.sessions.create({
@@ -585,7 +595,7 @@ async function run() {
     app.get("/checkout-session/:sessionId", async (req, res) => {
       try {
         const session = await stripe.checkout.sessions.retrieve(
-          req.params.sessionId
+          req.params.sessionId,
         );
         res.send({
           transactionId: session.payment_intent,
@@ -638,7 +648,7 @@ async function run() {
         paidAt: new Date(),
         deadline: deadline,
       };
-      console.log("sbmit info", submitInfo);
+      //console.log("sbmit info", submitInfo);
       const result = await submissionsCollection.insertOne(submitInfo);
 
       // update participations in contest
@@ -646,7 +656,7 @@ async function run() {
         {
           _id: new ObjectId(session.metadata.contestId),
         },
-        { $inc: { participantsCount: 1 } }
+        { $inc: { participantsCount: 1 } },
       );
 
       return res.send({
@@ -654,7 +664,7 @@ async function run() {
       });
     });
   } catch (error) {
-    console.log(error);
+    //console.log(error);
   }
 }
 run().catch(console.dir);
